@@ -64,6 +64,8 @@ function mapCopilotEvent(event: SessionEvent, state: RunState): AgentEvent | nul
       }
 
     case "assistant.message":
+      if (!state.messageId) state.messageId = event.data.messageId
+      state.messageContent = event.data.content
       return {
         type: "message.completed",
         timestamp: ts,
