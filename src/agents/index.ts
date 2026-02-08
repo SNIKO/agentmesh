@@ -1,7 +1,6 @@
-import type { AgentConfig } from "../types"
-import type { Agent } from "./agent"
-import { createCodexAgent } from "./agent-codex"
-import { createCopilotAgent } from "./agent-copilot"
+import { createCodexAgent } from "./agent-codex.ts"
+import { createCopilotAgent } from "./agent-copilot.ts"
+import type { Agent, AgentConfig } from "./types.ts"
 
 /**
  * Create an agent instance for the specified provider.
@@ -37,4 +36,4 @@ export function createAgent(config: AgentConfig): Agent {
   }
 }
 
-export type { Agent } from "./agent"
+export type * from "./types.ts"

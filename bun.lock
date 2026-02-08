@@ -8,6 +8,7 @@
         "@github/copilot-sdk": "^0.1.20",
         "@openai/codex": "^0.93.0",
         "@openai/codex-sdk": "^0.93.0",
+        "zod": "^4.3.6",
       },
       "devDependencies": {
         "@biomejs/biome": "latest",

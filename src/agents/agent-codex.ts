@@ -7,7 +7,9 @@ import {
   type ThreadItem,
   type Usage,
 } from "@openai/codex-sdk"
+import { renderMessages, runWithEvents, tryParseOutput } from "./agent-utils.ts"
 import type {
+  Agent,
   AgentConfig,
   AgentEvent,
   AgentStats,
@@ -15,9 +17,7 @@ import type {
   RawEvent,
   RunHandle,
   RunOptions,
-} from "../types"
-import type { Agent } from "./agent"
-import { renderMessages, runWithEvents, tryParseOutput } from "./agent"
+} from "./types.ts"
 
 interface ToolState {
   name: string
@@ -152,16 +152,20 @@ function mapCommandExecution(
 
   if (!state.tools.has(item.id)) {
     state.tools.set(item.id, existing)
-    events.push({
-      type: "tool.started",
-      timestamp: ts,
-      data: {
-        toolId: item.id,
-        name: existing.name,
-        kind: "builtin",
-        input: { command: item.command },
+    state.stats.toolCalls = (state.stats.toolCalls ?? 0) + 1
+    events.push(
+      {
+        type: "tool.started",
+        timestamp: ts,
+        data: {
+          toolId: item.id,
+          name: existing.name,
+          kind: "builtin",
+          input: { command: item.command },
+        },
       },
-    })
+      { type: "stats.updated", timestamp: ts, data: state.stats },
+    )
   }
 
   const output = item.aggregated_output ?? ""
@@ -228,17 +232,21 @@ function mapMcpToolCall(
 
   if (!state.tools.has(item.id)) {
     state.tools.set(item.id, existing)
-    events.push({
-      type: "tool.started",
-      timestamp: ts,
-      data: {
-        toolId: item.id,
-        name: item.tool,
-        kind: "mcp",
-        input: item.arguments as Record<string, unknown>,
-        mcp: { server: item.server, tool: item.tool },
+    state.stats.toolCalls = (state.stats.toolCalls ?? 0) + 1
+    events.push(
+      {
+        type: "tool.started",
+        timestamp: ts,
+        data: {
+          toolId: item.id,
+          name: item.tool,
+          kind: "mcp",
+          input: item.arguments as Record<string, unknown>,
+          mcp: { server: item.server, tool: item.tool },
+        },
       },
-    })
+      { type: "stats.updated", timestamp: ts, data: state.stats },
+    )
   }
 
   if (phase === "item.completed") {
@@ -282,9 +290,11 @@ function mapFileChange(item: Extract<ThreadItem, { type: "file_change" }>): Agen
 function mapWebSearch(
   item: Extract<ThreadItem, { type: "web_search" }>,
   phase: "item.started" | "item.updated" | "item.completed",
+  state: RunState,
 ): AgentEvent[] {
   const ts = Date.now()
   if (phase === "item.started") {
+    state.stats.toolCalls = (state.stats.toolCalls ?? 0) + 1
     return [
       {
         type: "tool.started",
@@ -296,6 +306,7 @@ function mapWebSearch(
           input: { query: item.query },
         },
       },
+      { type: "stats.updated", timestamp: ts, data: state.stats },
     ]
   }
 
@@ -315,6 +326,7 @@ function mapWebSearch(
 function mapTodoList(
   item: Extract<ThreadItem, { type: "todo_list" }>,
   phase: "item.started" | "item.updated" | "item.completed",
+  state: RunState,
 ): AgentEvent[] {
   const summary = item.items
     .map((todo) => `${todo.completed ? "[x]" : "[ ]"} ${todo.text}`)
@@ -322,12 +334,14 @@ function mapTodoList(
   const ts = Date.now()
 
   if (phase === "item.started") {
+    state.stats.toolCalls = (state.stats.toolCalls ?? 0) + 1
     return [
       {
         type: "tool.started",
         timestamp: ts,
         data: { toolId: item.id, name: "todo_list", kind: "builtin", input: { items: item.items } },
       },
+      { type: "stats.updated", timestamp: ts, data: state.stats },
     ]
   }
 
@@ -368,9 +382,9 @@ function mapItemEvent(
     case "mcp_tool_call":
       return mapMcpToolCall(item, type, state)
     case "web_search":
-      return mapWebSearch(item, type)
+      return mapWebSearch(item, type, state)
     case "todo_list":
-      return mapTodoList(item, type)
+      return mapTodoList(item, type, state)
     case "error":
       return [createErrorEvent("PROVIDER_ERROR", item.message, true)]
     default:
@@ -486,5 +500,5 @@ export function createCodexAgent(config: AgentConfig): Agent {
     // Codex SDK does not expose a close method; nothing to clean up.
   }
 
-  return { run, close }
+  return { provider: config.provider, model: config.model, run, close }
 }

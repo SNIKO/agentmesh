@@ -1,35 +1,41 @@
-// Types
-
 // Agent
-export { type Agent, createAgent } from "./agents"
+
 export type {
   AgentConfig,
+  AgentErrorEvent,
   AgentEvent,
-  // Stats
   AgentStats,
   ErrorCode,
-  ErrorEvent,
-  // Events
   EventBase,
   FileChangedEvent,
   FileChangeKind,
   McpServerConfig,
-  // Messages
-  Message,
   MessageCompletedEvent,
   MessageDeltaEvent,
-  // Config
   Provider,
   RawEvent,
   ReasoningCompletedEvent,
   ReasoningDeltaEvent,
   RunHandle,
-  // Run
   RunOptions,
   StatsUpdatedEvent,
   ToolCompletedEvent,
-  // Enums
   ToolKind,
   ToolProgressEvent,
   ToolStartedEvent,
-} from "./types"
+} from "./agents/index.ts"
+export { type Agent, createAgent } from "./agents/index.ts"
+// Flow
+export { FlowError, flow } from "./flow/flow.ts"
+export type { FlowStats, FlowStatsSnapshot } from "./flow/flow-stats.ts"
+export type {
+  AgentLike,
+  FlowContext,
+  FlowEvent,
+  FlowHandle,
+  FlowNode,
+  FlowOptions,
+  FlowResult,
+} from "./flow/types.ts"
+// Shared
+export type { Message } from "./types.ts"

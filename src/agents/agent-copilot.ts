@@ -1,5 +1,8 @@
 import { CopilotClient, type SessionEvent } from "@github/copilot-sdk"
+import { subscriptionToAsyncGenerator } from "../utils/subscription.ts"
+import { renderMessages, runWithEvents, tryParseOutput } from "./agent-utils.ts"
 import type {
+  Agent,
   AgentConfig,
   AgentEvent,
   AgentStats,
@@ -7,10 +10,7 @@ import type {
   RawEvent,
   RunHandle,
   RunOptions,
-} from "../types"
-import { subscriptionToAsyncGenerator } from "../utils/subscription"
-import type { Agent } from "./agent"
-import { renderMessages, runWithEvents, tryParseOutput } from "./agent"
+} from "./types.ts"
 
 // ============================================
 // EVENT MAPPERS
@@ -38,107 +38,125 @@ function createRunState(): RunState {
   }
 }
 
-function mapCopilotEvent(event: SessionEvent, state: RunState): AgentEvent | null {
+function mapCopilotEvent(event: SessionEvent, state: RunState): AgentEvent[] {
   const ts = Date.now()
 
   switch (event.type) {
     case "session.error":
       state.hasError = true
-      return {
-        type: "error",
-        timestamp: ts,
-        data: {
-          code: "PROVIDER_ERROR" as ErrorCode,
-          message: event.data.message,
-          recoverable: false,
+      return [
+        {
+          type: "error",
+          timestamp: ts,
+          data: {
+            code: "PROVIDER_ERROR" as ErrorCode,
+            message: event.data.message,
+            recoverable: false,
+          },
         },
-      }
+      ]
 
     case "assistant.message_delta":
       if (!state.messageId) state.messageId = event.data.messageId
       state.messageContent += event.data.deltaContent
-      return {
-        type: "message.delta",
-        timestamp: ts,
-        data: { messageId: event.data.messageId, delta: event.data.deltaContent },
-      }
+      return [
+        {
+          type: "message.delta",
+          timestamp: ts,
+          data: { messageId: event.data.messageId, delta: event.data.deltaContent },
+        },
+      ]
 
     case "assistant.message":
       if (!state.messageId) state.messageId = event.data.messageId
       state.messageContent = event.data.content
-      return {
-        type: "message.completed",
-        timestamp: ts,
-        data: { messageId: event.data.messageId, content: event.data.content },
-      }
+      return [
+        {
+          type: "message.completed",
+          timestamp: ts,
+          data: { messageId: event.data.messageId, content: event.data.content },
+        },
+      ]
 
     case "assistant.reasoning_delta":
       if (!state.reasoningId) state.reasoningId = event.data.reasoningId
       state.reasoningContent += event.data.deltaContent
-      return {
-        type: "reasoning.delta",
-        timestamp: ts,
-        data: { reasoningId: event.data.reasoningId, delta: event.data.deltaContent },
-      }
+      return [
+        {
+          type: "reasoning.delta",
+          timestamp: ts,
+          data: { reasoningId: event.data.reasoningId, delta: event.data.deltaContent },
+        },
+      ]
 
     case "assistant.reasoning":
-      return {
-        type: "reasoning.completed",
-        timestamp: ts,
-        data: { reasoningId: event.data.reasoningId, content: event.data.content },
-      }
+      return [
+        {
+          type: "reasoning.completed",
+          timestamp: ts,
+          data: { reasoningId: event.data.reasoningId, content: event.data.content },
+        },
+      ]
 
     case "tool.execution_start":
       if (event.data.toolName === "report_intent") {
         // skip internal intent reporting tool
-        return null
+        return []
       }
 
       state.activeTools.set(event.data.toolCallId, event.data.toolName)
-      return {
-        type: "tool.started",
-        timestamp: ts,
-        data: {
-          toolId: event.data.toolCallId,
-          name: event.data.toolName,
-          kind: event.data.mcpServerName ? "mcp" : "builtin",
-          input: event.data.arguments as Record<string, unknown> | undefined,
-          mcp: event.data.mcpServerName
-            ? {
-                server: event.data.mcpServerName,
-                tool: event.data.mcpToolName ?? event.data.toolName,
-              }
-            : undefined,
+      state.stats.toolCalls = (state.stats.toolCalls ?? 0) + 1
+      return [
+        {
+          type: "tool.started",
+          timestamp: ts,
+          data: {
+            toolId: event.data.toolCallId,
+            name: event.data.toolName,
+            kind: event.data.mcpServerName ? "mcp" : "builtin",
+            input: event.data.arguments as Record<string, unknown> | undefined,
+            mcp: event.data.mcpServerName
+              ? {
+                  server: event.data.mcpServerName,
+                  tool: event.data.mcpToolName ?? event.data.toolName,
+                }
+              : undefined,
+          },
         },
-      }
+        { type: "stats.updated", timestamp: ts, data: state.stats },
+      ]
 
     case "tool.execution_progress":
-      return {
-        type: "tool.progress",
-        timestamp: ts,
-        data: { toolId: event.data.toolCallId, message: event.data.progressMessage },
-      }
+      return [
+        {
+          type: "tool.progress",
+          timestamp: ts,
+          data: { toolId: event.data.toolCallId, message: event.data.progressMessage },
+        },
+      ]
 
     case "tool.execution_complete": {
       const toolName = state.activeTools.get(event.data.toolCallId) ?? "unknown"
 
       if (toolName === "report_intent") {
         // skip internal intent reporting tool
-        return null
+        return []
       }
 
       state.activeTools.delete(event.data.toolCallId)
-      return {
-        type: "tool.completed",
-        timestamp: ts,
-        data: {
-          toolId: event.data.toolCallId,
-          name: toolName,
-          success: event.data.success,
-          output: event.data.result?.content,
-          error: event.data.error?.message,
+      return [
+        {
+          type: "tool.completed",
+          timestamp: ts,
+          data: {
+            toolId: event.data.toolCallId,
+            name: toolName,
+            success: event.data.success,
+            output: event.data.result?.content,
+            error: event.data.error?.message,
+          },
         },
-      }
+      ]
     }
 
     case "assistant.usage":
@@ -149,17 +167,17 @@ function mapCopilotEvent(event: SessionEvent, state: RunState): AgentEvent | nul
       }
       state.stats.costUsd = event.data.cost
       state.stats.durationMs = event.data.duration
-      return { type: "stats.updated", timestamp: ts, data: state.stats }
+      return [{ type: "stats.updated", timestamp: ts, data: state.stats }]
 
     case "session.usage_info":
       state.stats.context = {
         contextSize: event.data.tokenLimit,
         usedTokens: event.data.currentTokens,
       }
-      return { type: "stats.updated", timestamp: ts, data: state.stats }
+      return [{ type: "stats.updated", timestamp: ts, data: state.stats }]
 
     default:
-      return null
+      return []
   }
 }
 
@@ -258,8 +276,8 @@ export function createCopilotAgent(config: AgentConfig): Agent {
         }
 
         const mapped = mapCopilotEvent(event, state)
-        if (mapped) {
-          yield mapped
+        for (const item of mapped) {
+          yield item
         }
       }
 
@@ -287,5 +305,5 @@ export function createCopilotAgent(config: AgentConfig): Agent {
     }
   }
 
-  return { run, close }
+  return { provider: config.provider, model: config.model, run, close }
 }

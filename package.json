@@ -16,10 +16,11 @@
   ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build src/index.ts --outdir dist --target node",
-    "check": "biome check .",
+    "build": "bun build src/index.ts --outdir dist --target node && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit && biome check .",
     "fix": "biome check --write .",
     "test": "bun test",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "bun run build"
   },
   "devDependencies": {
@@ -33,6 +34,7 @@
   "dependencies": {
     "@github/copilot-sdk": "^0.1.20",
     "@openai/codex": "^0.93.0",
-    "@openai/codex-sdk": "^0.93.0"
+    "@openai/codex-sdk": "^0.93.0",
+    "zod": "^4.3.6"
   }
 }
